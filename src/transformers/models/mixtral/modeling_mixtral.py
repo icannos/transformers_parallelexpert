@@ -855,26 +855,19 @@ class MixtralSparseMoeBlock(nn.Module):
         # this will be used to easily index which expert is going to be sollicitated
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
 
-
-        exprt_inputs = []
-        with record_function("Hidden states extraction"):
-            for expert_idx in range(self.num_experts):
-                idx, top_x = torch.where(expert_mask[expert_idx])
-                current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                exprt_inputs.append((idx, top_x, current_state))
-
         states_output = []
         with record_function("Expert Computation"):
-            for expert_idx, (idx, top_x, current_state) in enumerate(exprt_inputs):
-                expert_layer = self.experts[expert_idx]
+            for expert_idx in range(self.num_experts):
+                with record_function(f"Expert Computation {expert_idx}"):
+                    expert_layer = self.experts[expert_idx]
+                    idx, top_x = torch.where(expert_mask[expert_idx])
+                    current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+                    # Index the correct hidden states and compute the expert hidden state for
+                    # the current expert. We need to make sure to multiply the output hidden
+                    # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
+                    current_hidden_states = expert_layer(current_state) # * routing_weights[top_x, idx, None]
 
-                # Index the correct hidden states and compute the expert hidden state for
-                # the current expert. We need to make sure to multiply the output hidden
-                # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
-                current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                current_hidden_states = expert_layer(current_state) # * routing_weights[top_x, idx, None]
-
-                states_output.append((idx, top_x, current_state))
+                    states_output.append((idx, top_x, current_state))
 
         with record_function("Final Hidden States"):
             for idx, top_x, current_hidden_states in states_output:
