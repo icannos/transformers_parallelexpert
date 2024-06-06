@@ -855,13 +855,21 @@ class MixtralSparseMoeBlock(nn.Module):
         # this will be used to easily index which expert is going to be sollicitated
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
 
-        states_output = []
-        with record_function("Expert Computation"):
+
+        collected_states = []
+        with record_function('states collection'):
             for expert_idx in range(self.num_experts):
-                with record_function(f"Expert Computation {expert_idx}"):
-                    expert_layer = self.experts[expert_idx]
+                with record_function(f"Collection for {expert_idx}"):
                     idx, top_x = torch.where(expert_mask[expert_idx])
                     current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+                    collected_states.append((idx, top_x, current_state))
+
+        states_output = []
+        with record_function("Expert Computation"):
+            for expert_idx, (idx, top_x, current_state) in enumerate(collected_states):
+                with record_function(f"Expert Computation {expert_idx}"):
+                    expert_layer = self.experts[expert_idx]
+
                     # Index the correct hidden states and compute the expert hidden state for
                     # the current expert. We need to make sure to multiply the output hidden
                     # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
