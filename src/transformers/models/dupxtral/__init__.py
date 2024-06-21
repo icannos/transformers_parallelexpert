@@ -1,4 +1,4 @@
-# Copyright 2023 Mixtral AI and The HuggingFace Inc. team. All rights reserved.
+# Copyright 2023 Dupxtral AI and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ from ...utils import (
 
 
 _import_structure = {
-    "configuration_mixtral": ["MixtralConfig"],
+    "configuration_dupxtral": ["DupxtralConfig"],
 }
 
 
@@ -32,16 +32,16 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_mixtral"] = [
-        "MixtralForCausalLM",
-        "MixtralModel",
-        "MixtralPreTrainedModel",
-        "MixtralForSequenceClassification",
-        "MixtralForTokenClassification",
+        "DupxtralForCausalLM",
+        "DupxtralModel",
+        "DupxtralPreTrainedModel",
+        "DupxtralForSequenceClassification",
+        "DupxtralForTokenClassification",
     ]
 
 
 if TYPE_CHECKING:
-    from .configuration_dupxtral import MixtralConfig
+    from .configuration_dupxtral import DupxtralConfig
 
     try:
         if not is_torch_available():
@@ -49,12 +49,12 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .modeling_duxtral import (
-            MixtralForCausalLM,
-            MixtralForSequenceClassification,
-            MixtralForTokenClassification,
-            MixtralModel,
-            MixtralPreTrainedModel,
+        from .modeling_dupxtral import (
+            DupxtralForCausalLM,
+            DupxtralForSequenceClassification,
+            DupxtralForTokenClassification,
+            DupxtralModel,
+            DupxtralPreTrainedModel,
         )
 
 

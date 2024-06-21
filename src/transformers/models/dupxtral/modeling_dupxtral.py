@@ -73,7 +73,7 @@ if is_torch_fx_available():
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "MixtralConfig"
+_CONFIG_FOR_DOC = "DupxtralConfig"
 
 
 def load_balancing_loss_func(
@@ -165,11 +165,11 @@ def _get_unpad_data(attention_mask):
     )
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Mixtral
-class MixtralRMSNorm(nn.Module):
+# Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Dupxtral
+class DupxtralRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
-        MixtralRMSNorm is equivalent to T5LayerNorm
+        DupxtralRMSNorm is equivalent to T5LayerNorm
         """
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
@@ -183,9 +183,9 @@ class MixtralRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-# copied from transformers.models.mistral.modeling_mistral.MistralRotaryEmbedding with Mistral->Mixtral
+# copied from transformers.models.mistral.modeling_mistral.MistralRotaryEmbedding with Mistral->Dupxtral
 # TODO @longjie no longer copied from Mistral after static cache
-class MixtralRotaryEmbedding(nn.Module):
+class DupxtralRotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
         super().__init__()
 
@@ -272,7 +272,7 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-# copied from transformers.models.mistral.modeling_mistral.MistralAttention with Mistral->Mixtral
+# copied from transformers.models.mistral.modeling_mistral.MistralAttention with Mistral->Dupxtral
 # TODO @longjie no longer copied from Mistral after static cache
 class DuxtralAttention(nn.Module):
     """
@@ -311,7 +311,7 @@ class DuxtralAttention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
-        self.rotary_emb = MixtralRotaryEmbedding(
+        self.rotary_emb = DupxtralRotaryEmbedding(
             self.head_dim,
             max_position_embeddings=self.max_position_embeddings,
             base=self.rope_theta,
@@ -397,11 +397,11 @@ class DuxtralAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-# copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2 with Mistral->Mixtral
+# copied from transformers.models.mistral.modeling_mistral.MistralFlashAttention2 with Mistral->Dupxtral
 # TODO @longjie no longer copied from Mistral after static cache
 class DuxtralFlashAttention2(DuxtralAttention):
     """
-    Mixtral flash attention module. This module inherits from `MixtralAttention` as the weights of the module stays
+    Dupxtral flash attention module. This module inherits from `DupxtralAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
     flash attention and deal with padding tokens in case the input contains any of them.
     """
@@ -685,16 +685,16 @@ class DuxtralFlashAttention2(DuxtralAttention):
         )
 
 
-# copied from transformers.models.mistral.modeling_mistral.MistralSdpaAttention with Mistral->Mixtral
+# copied from transformers.models.mistral.modeling_mistral.MistralSdpaAttention with Mistral->Dupxtral
 # TODO @longjie no longer copied from Mistral after static cache
 class DuxtralSdpaAttention(DuxtralAttention):
     """
-    Mixtral attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
-    `MixtralAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
+    Dupxtral attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
+    `DupxtralAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
     SDPA API.
     """
 
-    # Adapted from MixtralAttention.forward
+    # Adapted from DupxtralAttention.forward
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -707,7 +707,7 @@ class DuxtralSdpaAttention(DuxtralAttention):
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
             logger.warning_once(
-                "MixtralModel is using MixtralSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
+                "DupxtralModel is using DupxtralSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
                 'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
             )
             return super().forward(
@@ -785,7 +785,7 @@ MIXTRAL_ATTENTION_CLASSES = {
 }
 
 
-class MixtralBlockSparseTop2MLP(nn.Module):
+class DupxtralBlockSparseTop2MLP(nn.Module):
     def __init__(self, config: DupxtralConfig):
         super().__init__()
         self.ffn_dim = config.intermediate_size
@@ -825,9 +825,9 @@ class DupxtralSparseMoeBlock(nn.Module):
         # gating
         self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
 
-        self.num_experts = sum(config.experts_duplicate[k] for k in range(self.num_experts))
-        self.experts = nn.ModuleList([MixtralBlockSparseTop2MLP(config) for _ in range(self.num_experts)])
-        self.experts_mapping : Dict[Tuple[int, int], int] = config.experts_remapping[layer_idx]
+        self.num_experts = sum(config.experts_duplicate[layer_idx])
+        self.experts = nn.ModuleList([DupxtralBlockSparseTop2MLP(config) for _ in range(self.num_experts)])
+        self.expert_pair_mapping : Dict[Tuple[int, int], int] = config.expert_pair_remapping[layer_idx]
 
         # Jitter parameters
         self.jitter_noise = config.router_jitter_noise
@@ -846,7 +846,7 @@ class DupxtralSparseMoeBlock(nn.Module):
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
         # remap the expert indices according to the remapping dictionary
-        selected_experts = torch.tensor([self.experts_mapping[(ei, ej)] for ei, ej in selected_experts], device=hidden_states.device)
+        selected_experts = torch.tensor([self.expert_pair_mapping[(ei.item(), ej.item())] for ei, ej in selected_experts], device=hidden_states.device)
 
         # we cast back to the input dtype
         routing_weights = routing_weights.to(hidden_states.dtype)
@@ -868,7 +868,7 @@ class DupxtralSparseMoeBlock(nn.Module):
             # the current expert. We need to make sure to multiply the output hidden
             # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
             current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-            current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
+            current_hidden_states = expert_layer(current_state)  * routing_weights[top_x, idx, None]
 
             # However `index_add_` only support torch tensors for indexing so we'll use
             # the `top_x` tensor here.
@@ -877,7 +877,7 @@ class DupxtralSparseMoeBlock(nn.Module):
         return final_hidden_states, router_logits
 
 
-class MixtralDecoderLayer(nn.Module):
+class DupxtralDecoderLayer(nn.Module):
     def __init__(self, config: DupxtralConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -885,8 +885,8 @@ class MixtralDecoderLayer(nn.Module):
         self.self_attn = MIXTRAL_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx)
 
         self.block_sparse_moe = DupxtralSparseMoeBlock(config, layer_idx)
-        self.input_layernorm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = DupxtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = DupxtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -960,7 +960,7 @@ MIXTRAL_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`MixtralConfig`]):
+        config ([`DupxtralConfig`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -968,15 +968,15 @@ MIXTRAL_START_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare Mixtral Model outputting raw hidden-states without any specific head on top.",
+    "The bare Dupxtral Model outputting raw hidden-states without any specific head on top.",
     MIXTRAL_START_DOCSTRING,
 )
-# Copied from transformers.models.qwen2.modeling_qwen2.Qwen2PreTrainedModel with Qwen2->Mixtral
-class MixtralPreTrainedModel(PreTrainedModel):
+# Copied from transformers.models.qwen2.modeling_qwen2.Qwen2PreTrainedModel with Qwen2->Dupxtral
+class DupxtralPreTrainedModel(PreTrainedModel):
     config_class = DupxtralConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["MixtralDecoderLayer"]
+    _no_split_modules = ["DupxtralDecoderLayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
     _supports_sdpa = True
@@ -1062,17 +1062,17 @@ MIXTRAL_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare Mixtral Model outputting raw hidden-states without any specific head on top.",
+    "The bare Dupxtral Model outputting raw hidden-states without any specific head on top.",
     MIXTRAL_START_DOCSTRING,
 )
-# copied from transformers.models.mistral.modeling_mistral.MistralModel with MISTRAL->MIXTRAL,Mistral->Mixtral
+# copied from transformers.models.mistral.modeling_mistral.MistralModel with MISTRAL->MIXTRAL,Mistral->Dupxtral
 # TODO @longjie no longer copied from Mistral after static cache
-class MixtralModel(MixtralPreTrainedModel):
+class DupxtralModel(DupxtralPreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MixtralDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`DupxtralDecoderLayer`]
 
     Args:
-        config: MixtralConfig
+        config: DupxtralConfig
     """
 
     def __init__(self, config: DupxtralConfig):
@@ -1082,10 +1082,10 @@ class MixtralModel(MixtralPreTrainedModel):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [MixtralDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [DupxtralDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self._attn_implementation = config._attn_implementation
-        self.norm = MixtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = DupxtralRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
@@ -1165,7 +1165,7 @@ class MixtralModel(MixtralPreTrainedModel):
             if is_padding_right:
                 raise ValueError(
                     "You are attempting to perform batched generation with padding_side='right'"
-                    " this may lead to unexpected behaviour for Flash Attention version of Mixtral. Make sure to "
+                    " this may lead to unexpected behaviour for Flash Attention version of Dupxtral. Make sure to "
                     " call `tokenizer.padding_side  = 'left'` before tokenizing the input. "
                 )
 
@@ -1262,12 +1262,12 @@ class MixtralModel(MixtralPreTrainedModel):
         )
 
 
-class MixtralForCausalLM(MixtralPreTrainedModel):
+class DupxtralForCausalLM(DupxtralPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = MixtralModel(config)
+        self.model = DupxtralModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.router_aux_loss_coef = config.router_aux_loss_coef
@@ -1323,10 +1323,10 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import AutoTokenizer, MixtralForCausalLM
+        >>> from transformers import AutoTokenizer, DupxtralForCausalLM
 
-        >>> model = MixtralForCausalLM.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
-        >>> tokenizer = AutoTokenizer.from_pretrained("mistralai/Mixtral-8x7B-v0.1")
+        >>> model = DupxtralForCausalLM.from_pretrained("mistralai/Dupxtral-8x7B-v0.1")
+        >>> tokenizer = AutoTokenizer.from_pretrained("mistralai/Dupxtral-8x7B-v0.1")
 
         >>> prompt = "Hey, are you conscious? Can you talk to me?"
         >>> inputs = tokenizer(prompt, return_tensors="pt")
@@ -1479,9 +1479,9 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
 
 @add_start_docstrings(
     """
-    The Mixtral Model transformer with a sequence classification head on top (linear layer).
+    The Dupxtral Model transformer with a sequence classification head on top (linear layer).
 
-    [`MixtralForSequenceClassification`] uses the last token in order to do the classification, as other causal models
+    [`DupxtralForSequenceClassification`] uses the last token in order to do the classification, as other causal models
     (e.g. GPT-2) do.
 
     Since it does classification on the last token, it requires to know the position of the last token. If a
@@ -1492,12 +1492,12 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
     """,
     MIXTRAL_START_DOCSTRING,
 )
-# Copied from transformers.models.llama.modeling_llama.LlamaForSequenceClassification with Llama->Mixtral, LLAMA->MIXTRAL
-class MixtralForSequenceClassification(MixtralPreTrainedModel):
+# Copied from transformers.models.llama.modeling_llama.LlamaForSequenceClassification with Llama->Dupxtral, LLAMA->MIXTRAL
+class DupxtralForSequenceClassification(DupxtralPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.model = MixtralModel(config)
+        self.model = DupxtralModel(config)
         self.score = nn.Linear(config.hidden_size, self.num_labels, bias=False)
 
         # Initialize weights and apply final processing
@@ -1603,17 +1603,17 @@ class MixtralForSequenceClassification(MixtralPreTrainedModel):
 
 @add_start_docstrings(
     """
-    The Mixtral Model transformer with a token classification head on top (a linear layer on top of the hidden-states
+    The Dupxtral Model transformer with a token classification head on top (a linear layer on top of the hidden-states
     output) e.g. for Named-Entity-Recognition (NER) tasks.
     """,
     MIXTRAL_START_DOCSTRING,
 )
-# Copied from transformers.models.llama.modeling_llama.LlamaForTokenClassification with Llama->Mixtral, LLAMA->MIXTRAL
-class MixtralForTokenClassification(MixtralPreTrainedModel):
+# Copied from transformers.models.llama.modeling_llama.LlamaForTokenClassification with Llama->Dupxtral, LLAMA->MIXTRAL
+class DupxtralForTokenClassification(DupxtralPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.model = MixtralModel(config)
+        self.model = DupxtralModel(config)
         if getattr(config, "classifier_dropout", None) is not None:
             classifier_dropout = config.classifier_dropout
         elif getattr(config, "hidden_dropout", None) is not None:
