@@ -994,10 +994,14 @@ class SmoeSharedExpertPoolDecoderLayer(nn.Module):
         # Hold the shared expert pool
         self.moe_block = SmoeSparseMoeBlock(config)
 
-        self.self_attn = [
-            MIXTRAL_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx)
-            for layer_idx in range(config.num_hidden_layers)
-        ]
+        self.self_attn = nn.ModuleList(
+            [
+                MIXTRAL_ATTENTION_CLASSES[config._attn_implementation](
+                    config, layer_idx
+                )
+                for layer_idx in range(config.num_hidden_layers)
+            ]
+        )
         self.input_layernorm = [
             SmoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
             for _ in range(config.num_hidden_layers)
