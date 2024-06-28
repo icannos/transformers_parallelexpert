@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Dupxtral model configuration"""
+from typing import Tuple, Dict
 
 from ..mixtral.configuration_mixtral import MixtralConfig
 from ...utils import logging
@@ -173,7 +174,6 @@ class DupxtralConfig(MixtralConfig):
         self.router_jitter_noise = router_jitter_noise
 
         self.experts_duplicate = experts_duplicate
-        self.expert_pair_remapping = experts_remapping
-
-
-
+        self.expert_pair_remapping: Dict[Tuple[int, int], Tuple[int, int]] = (
+            experts_remapping
+        )

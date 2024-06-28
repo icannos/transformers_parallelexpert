@@ -1055,7 +1055,7 @@ class MixtralSparseMoeBlock(nn.Module):
                         current_state
                     )  # * routing_weights[top_x, idx, None]
 
-                    states_output.append((idx, top_x, current_state))
+                    states_output.append((idx, top_x, current_hidden_states))
 
         with record_function("Final Hidden States"):
             for idx, top_x, current_hidden_states in states_output:
