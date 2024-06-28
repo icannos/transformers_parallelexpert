@@ -133,6 +133,7 @@ class MixtralConfig(PretrainedConfig):
         output_router_logits=False,
         router_aux_loss_coef=0.001,
         router_jitter_noise=0.0,
+        forward="base",  # base, parallel
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -160,6 +161,7 @@ class MixtralConfig(PretrainedConfig):
         self.output_router_logits = output_router_logits
         self.router_aux_loss_coef = router_aux_loss_coef
         self.router_jitter_noise = router_jitter_noise
+        self.forward = forward
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,
