@@ -992,9 +992,6 @@ class DupxtralSparseMoeBlock(nn.Module):
             selected_experts[:, 0], selected_experts[:, 1]
         ]
 
-        print(selected_experts)
-        print(selected_experts_2)
-
         # we cast back to the input dtype
         routing_weights = routing_weights.to(hidden_states.dtype)
 
