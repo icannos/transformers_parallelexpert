@@ -1039,18 +1039,20 @@ class MixtralSparseMoeBlock(nn.Module):
             for expert_idx in range(self.num_experts):
                 with record_function(f"Collection for {expert_idx}"):
                     idx, top_x = torch.where(expert_mask[expert_idx])
+                    if idx.shape[0] == 0:
+                        continue
                     current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                    collected_states.append((idx, top_x, current_state))
+                    collected_states.append((expert_idx, idx, top_x, current_state))
 
         states_output = []
         with record_function("Expert Computation"):
-            for expert_idx, (idx, top_x, current_state) in enumerate(collected_states):
+            for expert_idx, idx, top_x, current_state in collected_states:
                 with record_function(f"Expert Computation {expert_idx}"):
                     expert_layer = self.experts[expert_idx]
 
                     # Index the correct hidden states and compute the expert hidden state for
                     # the current expert. We need to make sure to multiply the output hidden
-                    # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
+                    # states by `routing_weights` on the coresponding tokens (top-1 and top-2)
                     current_hidden_states = expert_layer(
                         current_state
                     )  # * routing_weights[top_x, idx, None]
@@ -1064,7 +1066,9 @@ class MixtralSparseMoeBlock(nn.Module):
                 final_hidden_states.index_add_(
                     0,
                     top_x,
-                    current_hidden_states.to(hidden_states.dtype)
+                    current_hidden_states.to(
+                        dtype=hidden_states.dtype, device=hidden_states.device
+                    )
                     * routing_weights[top_x, idx, None],
                 )
 

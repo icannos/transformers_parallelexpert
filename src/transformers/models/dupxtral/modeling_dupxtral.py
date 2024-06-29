@@ -980,13 +980,6 @@ class DupxtralSparseMoeBlock(nn.Module):
 
         # remap the expert indices according to the remapping dictionary
 
-        selected_experts_2 = torch.tensor(
-            [
-                self.expert_pair_mapping_2[(i.item(), j.item())]
-                for i, j in selected_experts
-            ]
-        )
-
         self.expert_pair_mapping = self.expert_pair_mapping.to(selected_experts.device)
         selected_experts = self.expert_pair_mapping[
             selected_experts[:, 0], selected_experts[:, 1]
@@ -1013,12 +1006,14 @@ class DupxtralSparseMoeBlock(nn.Module):
             for expert_idx in range(self.num_experts):
                 with record_function(f"Collection for {expert_idx}"):
                     idx, top_x = torch.where(expert_mask[expert_idx])
+                    if idx.shape[0] == 0:
+                        continue
                     current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                    collected_states.append((idx, top_x, current_state))
+                    collected_states.append((expert_idx, idx, top_x, current_state))
 
         states_output = []
         with record_function("Expert Computation"):
-            for expert_idx, (idx, top_x, current_state) in enumerate(collected_states):
+            for expert_idx, idx, top_x, current_state in collected_states:
                 with record_function(f"Expert Computation {expert_idx}"):
                     expert_layer = self.experts[expert_idx]
 
@@ -1038,7 +1033,9 @@ class DupxtralSparseMoeBlock(nn.Module):
                 final_hidden_states.index_add_(
                     0,
                     top_x,
-                    current_hidden_states.to(hidden_states.dtype)
+                    current_hidden_states.to(
+                        dtype=hidden_states.dtype, device=hidden_states.device
+                    )
                     * routing_weights[top_x, idx, None],
                 )
 
