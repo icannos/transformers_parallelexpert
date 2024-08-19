@@ -907,6 +907,27 @@ class DupxtralBlockSparseTop2MLP(nn.Module):
         return current_hidden_states
 
 
+def python_fused_where(expert_mask):
+    idx_and_topx = []
+
+    expert_indices, idx, top_x = torch.where(expert_mask)
+
+    expert_indices = expert_indices.detach().cpu().tolist()
+
+    prev = 0
+    prev_expert_idx = expert_indices[0]
+
+    for k, expert_idx in enumerate(expert_indices):
+        if expert_idx != prev_expert_idx and k != 0:
+            idx_and_topx.append((prev_expert_idx, idx[prev:k], top_x[prev:k]))
+            prev = k
+            prev_expert_idx = expert_idx
+
+    idx_and_topx.append((prev_expert_idx, idx[prev:], top_x[prev:]))
+
+    return idx_and_topx
+
+
 class DupxtralSparseMoeBlock(nn.Module):
     """
     This implementation is
@@ -925,6 +946,7 @@ class DupxtralSparseMoeBlock(nn.Module):
         self.ffn_dim = config.intermediate_size
         self.num_experts = config.num_local_experts
         self.top_k = config.num_experts_per_tok
+        self.fixed_routing_proba: Optional[torch.Tensor] = config.router_distribution
 
         # gating
         self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
@@ -961,9 +983,89 @@ class DupxtralSparseMoeBlock(nn.Module):
         # Jitter parameters
         self.jitter_noise = config.router_jitter_noise
 
+    def single_token_forward(self, hidden_states: torch.Tensor):
+
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        if self.training and self.jitter_noise > 0:
+            hidden_states *= torch.empty_like(hidden_states).uniform_(
+                1.0 - self.jitter_noise, 1.0 + self.jitter_noise
+            )
+        hidden_states = hidden_states.view(-1, hidden_dim)
+
+        assert (
+            hidden_states.shape[0] == 1
+        ), "This method is only for single token forward"
+
+        # router_logits: (batch * sequence_length, n_experts)
+        router_logits = self.gate(hidden_states)
+
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+
+        if self.fixed_routing_proba is not None:
+            # duplicate the fixed routing proba for each token in the batch
+            self.fixed_routing_proba = self.fixed_routing_proba.to(hidden_states.device)
+            fixed_routing_proba = self.fixed_routing_proba.repeat(batch_size, 1)
+            # sample randomly top_k experts according to the fixed routing proba
+
+            # shape (batch_size, top_k)
+            selected_experts = torch.multinomial(
+                self.fixed_routing_proba, self.top_k, replacement=False
+            )
+            # select the corresponding routing weights
+            routing_weights = routing_weights.gather(1, selected_experts)
+
+        else:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        # remap the expert indices according to the remapping dictionary
+
+        self.expert_pair_mapping = self.expert_pair_mapping.to(selected_experts.device)
+
+        selected_experts = self.expert_pair_mapping[
+            selected_experts[:, 0], selected_experts[:, 1]
+        ][
+            0
+        ]  # just a single token, these are the k experts
+
+        final_hidden_states = torch.zeros(
+            (batch_size * sequence_length, hidden_dim),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+
+        states_output = []
+
+        with record_function("Expert Computation"):
+            for idx, expert_idx in enumerate(selected_experts):
+                expert_layer = self.experts[expert_idx]
+                current_hidden_states = expert_layer(hidden_states)
+                current_hidden_states = current_hidden_states
+                states_output.append((idx, current_hidden_states))
+
+        with record_function("Final Hidden States"):
+            for idx, current_hidden_states in states_output:
+                final_hidden_states += (
+                    current_hidden_states.to(hidden_states.device)
+                    * routing_weights[0, idx]
+                )
+
+        final_hidden_states = final_hidden_states.reshape(
+            batch_size, sequence_length, hidden_dim
+        )
+        return final_hidden_states, router_logits
+
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """ """
+
         batch_size, sequence_length, hidden_dim = hidden_states.shape
+
+        if batch_size * sequence_length == 1:
+            return self.single_token_forward(hidden_states)
+
         if self.training and self.jitter_noise > 0:
             hidden_states *= torch.empty_like(hidden_states).uniform_(
                 1.0 - self.jitter_noise, 1.0 + self.jitter_noise
@@ -971,16 +1073,30 @@ class DupxtralSparseMoeBlock(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_dim)
         # router_logits: (batch * sequence_length, n_experts)
         router_logits = self.gate(hidden_states)
-
         routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(
-            routing_weights, self.top_k, dim=-1
-        )
+
+        if self.fixed_routing_proba is not None:
+            # duplicate the fixed routing proba for each token in the batch
+            self.fixed_routing_proba = self.fixed_routing_proba.to(hidden_states.device)
+            fixed_routing_proba = self.fixed_routing_proba.repeat(batch_size, 1)
+            # sample randomly top_k experts according to the fixed routing proba
+
+            # shape (batch_size, top_k)
+            selected_experts = torch.multinomial(
+                fixed_routing_proba, self.top_k, replacement=False
+            )
+
+            routing_weights = routing_weights.gather(1, selected_experts)
+        else:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
         # remap the expert indices according to the remapping dictionary
 
         self.expert_pair_mapping = self.expert_pair_mapping.to(selected_experts.device)
+
         selected_experts = self.expert_pair_mapping[
             selected_experts[:, 0], selected_experts[:, 1]
         ]
@@ -1002,14 +1118,19 @@ class DupxtralSparseMoeBlock(nn.Module):
         # Loop over all available experts in the model and perform the computation on each expert
 
         collected_states = []
-        with record_function("states collection"):
-            for expert_idx in range(self.num_experts):
-                with record_function(f"Collection for {expert_idx}"):
-                    idx, top_x = torch.where(expert_mask[expert_idx])
-                    if idx.shape[0] == 0:
-                        continue
-                    current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                    collected_states.append((expert_idx, idx, top_x, current_state))
+        # with record_function("states collection"):
+        #     for expert_idx in range(self.num_experts):
+        #         with record_function(f"Collection for {expert_idx}"):
+        #             idx, top_x = torch.where(expert_mask[expert_idx])
+        #             if idx.shape[0] == 0:
+        #                 continue
+        #             current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+        #             collected_states.append((expert_idx, idx, top_x, current_state))
+
+        with record_function("states collection (fused)"):
+            for expert_idx, idx, top_x in python_fused_where(expert_mask):
+                current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+                collected_states.append((expert_idx, idx, top_x, current_state))
 
         states_output = []
         with record_function("Expert Computation"):

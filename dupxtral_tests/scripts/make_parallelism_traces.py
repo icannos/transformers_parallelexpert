@@ -27,6 +27,11 @@ def parse_args():
         default="base",
         choices=["base", "parallel", "full_duplication"],
     )
+
+    # w1 4096 x 14336
+    # w2 4096 x 14336
+    # w2 14336 x 4096
+
     parser.add_argument("--hidden_size", type=int, default=4096)
     parser.add_argument("--intermediate_size", type=int, default=14336)
 
@@ -35,6 +40,7 @@ def parse_args():
     parser.add_argument("--num_hidden_layers", type=int, default=2)
 
     parser.add_argument("--device_map", type=str, default="auto")
+    parser.add_argument("--expe_name", type=str, default="default")
 
     return parser.parse_args()
 
@@ -88,39 +94,13 @@ def auto_device_map(model: nn.Module) -> Dict[str, str]:
     return mapping
 
 
-def make_dupxtral_device_map_and_remapping(
-    model: nn.Module, duplicate: List[List[int]]
+def make_dupxtral_remapping_full_replication(
+    n_layers,
+    n_experts,
 ) -> Tuple[Dict[str, str], Dict[Tuple[int, int], Tuple[int, int]]]:
-    mapping = {}
     remapping = {}
 
-    expert_re = re.compile(
-        r"layers\.(?P<layer_id>\d+)\.block_sparse_moe\.experts\.(?P<expert_id>\d+)"
-    )
-    n_experts = 0
-    for name, m in model.named_modules():
-        splitted = name.split(".")
-
-        if name == "":
-            continue
-
-        # match the expert name
-        match = re.match(expert_re, name)
-        if match:
-            layer_id = int(match.group("layer_id"))
-            expert_id = int(match.group("expert_id"))
-
-            n_experts = max(n_experts, expert_id + 1)
-
-            if layer_id % 2 == 0:
-                mapping[name] = f"cuda:0"
-            else:
-                mapping[name] = f"cuda:1"
-
-        else:
-            mapping[name] = "cuda:0"
-
-    for k in range(len(duplicate)):
+    for k in range(n_layers):
         remapping[k] = {}
         for i in range(n_experts):
             for j in range(n_experts):
@@ -133,7 +113,7 @@ def make_dupxtral_device_map_and_remapping(
                 else:
                     remapping[k][(i, j)] = (new_i + 1, new_j)
 
-    return mapping, remapping
+    return remapping
 
 
 def initialize_model(args):
@@ -172,8 +152,8 @@ def initialize_model(args):
         with init_empty_weights():
             mixtral = MixtralModel(mixtral_base_config)
 
-            device_map, remapping = make_dupxtral_device_map_and_remapping(
-                mixtral, [[2 for _ in range(8)] for _ in range(args.num_hidden_layers)]
+            remapping = make_dupxtral_remapping_full_replication(
+                n_layers=args.num_hidden_layers, n_experts=8
             )
 
         dupxtral_config = DupxtralConfig(
@@ -190,6 +170,8 @@ def initialize_model(args):
         )
 
         mixtral = DupxtralModel(dupxtral_config).to(torch.float16)
+
+        device_map = make_device_map(mixtral)
 
     mixtral = dispatch_model(mixtral, device_map, main_device=torch.device("cuda:0"))
 
@@ -211,13 +193,13 @@ def main():
     ]
 
     schedule = torch.profiler.schedule(
-        skip_first=2, wait=1, warmup=1, active=10, repeat=8
+        skip_first=2, wait=1, warmup=1, active=3, repeat=2
     )
 
     with profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
         on_trace_ready=torch.profiler.tensorboard_trace_handler(
-            f"trace_dir2/{make_path_from_args(args)}_{unique_id}"
+            f"{args.expe_name}/{make_path_from_args(args)}_{unique_id}"
         ),
         schedule=schedule,
         profile_memory=True,

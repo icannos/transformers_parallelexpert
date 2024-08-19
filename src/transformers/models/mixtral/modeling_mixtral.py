@@ -907,6 +907,27 @@ class MixtralBlockSparseTop2MLP(nn.Module):
         return current_hidden_states
 
 
+def python_fused_where(expert_mask):
+    idx_and_topx = []
+
+    expert_indices, idx, top_x = torch.where(expert_mask)
+
+    expert_indices = expert_indices.detach().cpu().tolist()
+
+    prev = 0
+    prev_expert_idx = expert_indices[0]
+
+    for k, expert_idx in enumerate(expert_indices):
+        if expert_idx != prev_expert_idx and k != 0:
+            idx_and_topx.append((prev_expert_idx, idx[prev:k], top_x[prev:k]))
+            prev = k
+            prev_expert_idx = expert_idx
+
+    idx_and_topx.append((prev_expert_idx, idx[prev:], top_x[prev:]))
+
+    return idx_and_topx
+
+
 class MixtralSparseMoeBlock(nn.Module):
     """
     This implementation is
@@ -1035,14 +1056,20 @@ class MixtralSparseMoeBlock(nn.Module):
         ).permute(2, 1, 0)
 
         collected_states = []
-        with record_function("states collection"):
-            for expert_idx in range(self.num_experts):
-                with record_function(f"Collection for {expert_idx}"):
-                    idx, top_x = torch.where(expert_mask[expert_idx])
-                    if idx.shape[0] == 0:
-                        continue
-                    current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                    collected_states.append((expert_idx, idx, top_x, current_state))
+        # with record_function("states collection"):
+        #     for expert_idx in range(self.num_experts):
+        #         with record_function(f"Collection for {expert_idx}"):
+        #             idx, top_x = torch.where(expert_mask[expert_idx])
+        #             if idx.shape[0] == 0:
+        #                 continue
+        #             current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+        #             collected_states.append((expert_idx, idx, top_x, current_state))
+        #
+
+        with record_function("states collection (fused)"):
+            for expert_idx, idx, top_x in python_fused_where(expert_mask):
+                current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+                collected_states.append((expert_idx, idx, top_x, current_state))
 
         states_output = []
         with record_function("Expert Computation"):
