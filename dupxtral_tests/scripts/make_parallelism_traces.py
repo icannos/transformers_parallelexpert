@@ -90,6 +90,7 @@ def parse_args():
         "--random_expert_distribution_mode",
         type=str,
         default="uniform",
+        choices=["uniform", "softmax"],
     )
     parser.add_argument(
         "--random_expert_distribution_temperature", type=float, default=1.0
@@ -100,7 +101,7 @@ def parse_args():
         "--device_map",
         type=str,
         default="",
-        choices=["optim_greedy", "random", "naive"],
+        choices=["greedy", "random", "naive"],
     )
     parser.add_argument("--experts_per_gpu", type=int, default=8)
     parser.add_argument("--n_gpus", type=int, default=2)
@@ -111,6 +112,9 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
 
     return parser.parse_args()
+
+
+# example of python command
 
 
 def initialize_model(args):
@@ -132,6 +136,7 @@ def initialize_model(args):
 
     # pairs are non-zero values
     pairs = torch.nonzero(pair_proba).tolist()
+    print("PAIRS", pairs)
 
     # Initialize model
     if args.base_mode != "duplication":

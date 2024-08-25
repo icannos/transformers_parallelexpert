@@ -977,7 +977,7 @@ class DupxtralSparseMoeBlock(nn.Module):
         )
 
         for i in range(initial_number_of_experts):
-            for j in range(initial_number_of_experts):
+            for j in range(i + 1, initial_number_of_experts):
                 self.expert_pair_mapping[i, j] = torch.tensor(
                     sorted(
                         expert_pair_mapping[(i, j)],
@@ -1013,19 +1013,31 @@ class DupxtralSparseMoeBlock(nn.Module):
         if self.fixed_routing_proba is not None:
             # duplicate the fixed routing proba for each token in the batch
             self.fixed_routing_proba = self.fixed_routing_proba.to(hidden_states.device)
+            N_experts = self.fixed_routing_proba.shape[0]
 
-            # shape (batch_size, top_k)
-            selected_experts = torch.multinomial(
-                self.fixed_routing_proba, self.top_k, replacement=False
+            fixed_routing_proba = self.fixed_routing_proba.repeat(
+                batch_size * sequence_length, 1
             )
-            # select the corresponding routing weights
-            routing_weights = routing_weights.gather(1, selected_experts)
+            fixed_routing_proba = fixed_routing_proba.view(
+                batch_size * sequence_length, N_experts * N_experts
+            )
 
+            selected_experts = torch.multinomial(fixed_routing_proba, 1)
+            experts_1, experts_2 = (
+                selected_experts // N_experts,
+                selected_experts % N_experts,
+            )
+            selected_experts = torch.stack((experts_1, experts_2), dim=-1).to(
+                hidden_states.device
+            )
+            selected_experts = selected_experts.view((batch_size * sequence_length, 2))
+
+            routing_weights = routing_weights.gather(1, selected_experts)
         else:
             routing_weights, selected_experts = torch.topk(
                 routing_weights, self.top_k, dim=-1
             )
-            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+
         routing_weights = routing_weights.to(hidden_states.dtype)
 
         # remap the expert indices according to the remapping dictionary
