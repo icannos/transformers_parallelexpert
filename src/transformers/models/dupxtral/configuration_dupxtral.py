@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Dupxtral model configuration"""
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, List
 
 import torch
 
@@ -138,7 +138,8 @@ class DupxtralConfig(MixtralConfig):
         router_jitter_noise=0.0,
         experts_duplicate=None,
         experts_remapping=None,
-        router_distribution: Optional[torch.Tensor] = None,
+        experts2gpu=None,
+        router_distribution: Optional[List[torch.Tensor]] = None,
         **kwargs,
     ):
 
@@ -180,4 +181,5 @@ class DupxtralConfig(MixtralConfig):
         self.expert_pair_remapping: Dict[Tuple[int, int], Tuple[int, int]] = (
             experts_remapping
         )
-        self.router_distribution: Optional[torch.Tensor] = router_distribution
+        self.router_distribution: Optional[List[torch.Tensor]] = router_distribution
+        self.experts2gpu: Optional[List[List[int]]] = experts2gpu

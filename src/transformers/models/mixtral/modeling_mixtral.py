@@ -1073,7 +1073,9 @@ class MixtralSparseMoeBlock(nn.Module):
 
         states_output = []
         with record_function("Expert Computation"):
-            for expert_idx, idx, top_x, current_state in collected_states:
+            for expert_idx, idx, top_x, current_state in sorted(
+                collected_states, key=lambda x: x[0] % 2, reverse=True
+            ):
                 with record_function(f"Expert Computation {expert_idx}"):
                     expert_layer = self.experts[expert_idx]
 

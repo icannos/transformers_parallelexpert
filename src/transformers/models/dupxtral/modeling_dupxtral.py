@@ -946,7 +946,9 @@ class DupxtralSparseMoeBlock(nn.Module):
         self.ffn_dim = config.intermediate_size
         self.num_experts = config.num_local_experts
         self.top_k = config.num_experts_per_tok
-        self.fixed_routing_proba: Optional[torch.Tensor] = config.router_distribution
+        self.fixed_routing_proba: Optional[torch.Tensor] = config.router_distribution[
+            layer_idx
+        ]
 
         # gating
         self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
@@ -955,6 +957,8 @@ class DupxtralSparseMoeBlock(nn.Module):
         self.experts = nn.ModuleList(
             [DupxtralBlockSparseTop2MLP(config) for _ in range(self.num_experts)]
         )
+
+        self.experts_to_gpu = config.experts2gpu[layer_idx]
 
         expert_pair_mapping: Dict[Tuple[int, int], Tuple[int, int]] = (
             config.expert_pair_remapping[layer_idx]
@@ -975,7 +979,12 @@ class DupxtralSparseMoeBlock(nn.Module):
         for i in range(initial_number_of_experts):
             for j in range(initial_number_of_experts):
                 self.expert_pair_mapping[i, j] = torch.tensor(
-                    expert_pair_mapping[(i, j)], dtype=torch.int64
+                    sorted(
+                        expert_pair_mapping[(i, j)],
+                        key=lambda x: self.experts_to_gpu[x],
+                        reverse=True,
+                    ),
+                    dtype=torch.int64,
                 )
 
         self.expert_pair_mapping_2 = expert_pair_mapping
@@ -1004,8 +1013,6 @@ class DupxtralSparseMoeBlock(nn.Module):
         if self.fixed_routing_proba is not None:
             # duplicate the fixed routing proba for each token in the batch
             self.fixed_routing_proba = self.fixed_routing_proba.to(hidden_states.device)
-            fixed_routing_proba = self.fixed_routing_proba.repeat(batch_size, 1)
-            # sample randomly top_k experts according to the fixed routing proba
 
             # shape (batch_size, top_k)
             selected_experts = torch.multinomial(
@@ -1030,6 +1037,7 @@ class DupxtralSparseMoeBlock(nn.Module):
         ][
             0
         ]  # just a single token, these are the k experts
+        # sort the selected experts
 
         final_hidden_states = torch.zeros(
             (batch_size * sequence_length, hidden_dim),
@@ -1078,12 +1086,20 @@ class DupxtralSparseMoeBlock(nn.Module):
         if self.fixed_routing_proba is not None:
             # duplicate the fixed routing proba for each token in the batch
             self.fixed_routing_proba = self.fixed_routing_proba.to(hidden_states.device)
-            fixed_routing_proba = self.fixed_routing_proba.repeat(batch_size, 1)
-            # sample randomly top_k experts according to the fixed routing proba
+            N_experts = self.fixed_routing_proba.shape[0]
 
-            # shape (batch_size, top_k)
-            selected_experts = torch.multinomial(
-                fixed_routing_proba, self.top_k, replacement=False
+            fixed_routing_proba = self.fixed_routing_proba.repeat(batch_size, 1)
+            fixed_routing_proba = fixed_routing_proba.view(
+                batch_size, N_experts * N_experts
+            )
+
+            selected_experts = torch.multinomial(fixed_routing_proba, 1)
+            experts_1, experts_2 = (
+                selected_experts // N_experts,
+                selected_experts % N_experts,
+            )
+            selected_experts = torch.stack((experts_1, experts_2), dim=-1).to(
+                hidden_states.device
             )
 
             routing_weights = routing_weights.gather(1, selected_experts)
